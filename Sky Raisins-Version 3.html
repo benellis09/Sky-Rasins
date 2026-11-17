@@ -196,10 +196,20 @@
   #screen-start{
     display:block; inset:9px; padding:0; border:0; border-radius:23px;
     background:transparent; backdrop-filter:none; overflow:hidden;
-    cursor:pointer; font:inherit; color:inherit; text-align:center;
+    font:inherit; color:inherit; text-align:center;
   }
   #screen-start.hidden{display:none;}
-  #screen-start:focus-visible{outline:4px solid var(--honey); outline-offset:-5px;}
+  /* image map over the start button painted into the artwork. JS places it from
+     the art's own fractions (honouring object-fit:cover), so it never drifts. */
+  .splash-cta{
+    position:absolute; left:0; top:0; width:0; height:0;
+    margin:0; padding:0; border:0; border-radius:999px;
+    background:transparent; color:transparent;
+    cursor:pointer; z-index:3;
+  }
+  .splash-cta:focus-visible{outline:4px solid var(--honey); outline-offset:2px;}
+  /* no artwork? the painted title card's own button is the trigger instead */
+  #screen-start:not(.has-art) .splash-cta{display:none;}
   .splash-art{
     position:absolute; inset:0; width:100%; height:100%;
     object-fit:cover; object-position:center; display:block;
@@ -208,6 +218,7 @@
   .splash-stats{
     position:absolute; top:14px; left:14px;
     display:flex; gap:8px;
+    pointer-events:none;
   }
   .splash-stats .chip{padding:5px 12px;}
   .splash-stats .val{font-size:18px;}
@@ -216,6 +227,7 @@
     font-size:12px; font-weight:800; letter-spacing:.03em;
     background:rgba(255,255,255,.86); color:var(--ink);
     border:2px solid rgba(58,36,28,.2); border-radius:999px; padding:6px 13px;
+    pointer-events:none;
   }
   .splash-fallback{
     position:absolute; inset:0; display:flex; flex-direction:column;
@@ -269,20 +281,24 @@
   </div>
 
   <!-- START (splash art: put the artwork in this folder as splash.jpg) -->
-  <button class="screen" id="screen-start" aria-label="Play Sky Raisins">
-    <img class="splash-art" id="splash-art" src="splash.jpg" alt="" draggable="false">
+  <div class="screen" id="screen-start">
+    <img class="splash-art" id="splash-art" src="splash.jpg" alt="Sky Raisins" draggable="false">
+
+    <!-- image map: the artwork's own painted start button starts the game -->
+    <button class="splash-cta" id="splash-cta" type="button" aria-label="Play Sky Raisins"></button>
+
     <span class="splash-fallback">
       <span class="kicker">A tiny arcade game</span>
       <span class="title">SKY <span class="raisin">RAISINS</span></span>
       <span class="blurb">Sky raisins are flies. And this little mastiff thinks they are <em>delicious</em>. Walk, jump, and chomp your way through the meadow — then the living room.</span>
-      <span class="btn primary">TAP TO START</span>
+      <button class="btn primary" id="btn-play" type="button">TAP TO START</button>
     </span>
     <span class="splash-stats">
       <span class="chip score"><span class="lab">Best</span><span class="val" id="start-best">0</span></span>
       <span class="chip level"><span class="lab">Flies</span><span class="val" id="start-flies">0</span></span>
     </span>
     <span class="splash-hint">← → walk · Space jump · ↓ / Shift chomp · P pause</span>
-  </button>
+  </div>
 
   <!-- LEVEL UP -->
   <div class="screen hidden" id="screen-level">
@@ -1745,13 +1761,24 @@ function togglePause(){
   }
 }
 
-el('screen-start').addEventListener('click', ()=>{ if(G.state === 'menu') startGame(); });
+// two ways in: the start button painted into the artwork (mapped hotspot),
+// or the painted fallback card's own button when there is no artwork
+const startFromSplash = ()=>{ if(G.state === 'menu') startGame(); };
+el('splash-cta').addEventListener('click', startFromSplash);
+el('btn-play').addEventListener('click', startFromSplash);
 // the splash art is optional: if splash.jpg isn't there, the painted fallback shows
 const splashArt = el('splash-art');
+
+// Where the start button sits inside the artwork, as fractions of the image:
+// centre x, centre y, width, height. Measured off the splash art (1600x899).
+// Declared before markSplashArt() runs, since that call lays the hotspot out.
+const SPLASH_CTA = {x:0.500, y:0.928, w:0.300, h:0.080};
+
 const markSplashArt = ()=>{
   // while the art is still loading we assume it arrived, so the fallback never flashes
   const failed = splashArt.complete && splashArt.naturalWidth === 0;
   el('screen-start').classList.toggle('has-art', !failed);
+  layoutSplashCta();
 };
 splashArt.addEventListener('load', markSplashArt);
 splashArt.addEventListener('error', ()=>{
@@ -1760,6 +1787,26 @@ splashArt.addEventListener('error', ()=>{
   markSplashArt();
 });
 markSplashArt();
+
+// object-fit:cover crops the art to the card, so map the fractions through that
+// same scale-and-centre maths instead of using percentages of the card.
+function layoutSplashCta(){
+  const cta = el('splash-cta');
+  const card = el('screen-start');
+  if(!cta || !card) return;
+  const cw = card.clientWidth, ch = card.clientHeight;
+  const iw = splashArt.naturalWidth, ih = splashArt.naturalHeight;
+  if(!iw || !ih || !cw || !ch){ cta.style.width = '0px'; cta.style.height = '0px'; return; }
+  const scale = Math.max(cw/iw, ch/ih);       // cover
+  const dw = iw*scale, dh = ih*scale;
+  const ox = (cw - dw)/2, oy = (ch - dh)/2;   // negative when the art is cropped
+  cta.style.left   = (ox + (SPLASH_CTA.x - SPLASH_CTA.w/2)*dw) + 'px';
+  cta.style.top    = (oy + (SPLASH_CTA.y - SPLASH_CTA.h/2)*dh) + 'px';
+  cta.style.width  = (SPLASH_CTA.w*dw) + 'px';
+  cta.style.height = (SPLASH_CTA.h*dh) + 'px';
+}
+window.addEventListener('resize', layoutSplashCta);
+
 el('btn-retry').addEventListener('click', startGame);
 el('btn-restart').addEventListener('click', startGame);
 el('btn-next').addEventListener('click', nextLevel);
